@@ -1,8 +1,10 @@
 package homeassistant
 
-import "encoding/json"
-
-// Constants
+import (
+	"encoding/json"
+	"fmt"
+	"time"
+)
 
 const HA_MSG_TYPE_AUTH_REQUIRED = "auth_required"
 const HA_MSG_TYPE_AUTH = "auth"
@@ -11,219 +13,214 @@ const HA_MSG_TYPE_AUTH_INVALID = "auth_invalid"
 const HA_MSG_TYPE_RESULT = "result"
 const HA_MSG_TYPE_SUBSCRIBE_EVENTS = "subscribe_events"
 const HA_MSG_TYPE_EVENT = "event"
+const HA_MSG_TYPE_CALL_SERVICE = "call_service"
+const HA_MSG_TYPE_GET_STATES = "get_states"
 
-//Constructor mapper
-
-// Home Assistant Generic Message
-
-type HAMessage interface {
+type Message interface {
 	GetType() string
+	setType(messageType string)
+	GetID() int
+	SetID(id int)
 }
 
-type HAMessageImpl struct {
+type message struct {
 	Type string `json:"type"`
+	ID   *int   `json:"id,omitempty"`
 }
 
-func (hm *HAMessageImpl) GetType() string {
-	return hm.Type
+func (m *message) GetType() string {
+	return m.Type
 }
 
-// Auth Required Message
-
-type AuthRequiredMessage interface {
-	HAMessage
+func (m *message) setType(messageType string) {
+	m.Type = messageType
 }
 
-type authRequiredMessageImpl struct {
-	*HAMessageImpl
+func (m *message) GetID() int {
+	return *m.ID
 }
 
-func NewAuthRequiredMessage() AuthRequiredMessage {
-	authRequiredMessage := &authRequiredMessageImpl{HAMessageImpl: &HAMessageImpl{}}
-	authRequiredMessage.Type = HA_MSG_TYPE_AUTH_REQUIRED
-	return authRequiredMessage
+func (m *message) SetID(id int) {
+	m.ID = &id
 }
 
-// Auth Message
-
-type AuthMessage interface {
-	HAMessage
-	GetAccessToken() string
+type AuthRequiredMessage struct {
+	message
 }
 
-type authMessageImpl struct {
-	*HAMessageImpl
+type AuthMessage struct {
+	message
 	AccessToken string `json:"access_token"`
 }
 
-func (am *authMessageImpl) GetAccessToken() string {
-	return am.AccessToken
+type AuthOkMessage struct {
+	message
 }
 
-func NewAuthMessage(accessToken string) AuthMessage {
-	authMessage := &authMessageImpl{HAMessageImpl: &HAMessageImpl{}}
-	authMessage.Type = HA_MSG_TYPE_AUTH
-	authMessage.AccessToken = accessToken
-	return authMessage
+type AuthInvalidMessage struct {
+	message
 }
 
-// Auth Ok Message
-
-type AuthOkMessage interface {
-	HAMessage
+type SubscribeEventsMessage struct {
+	message
+	EventType *string `json:"event_type,omitempty"`
 }
 
-type authOkMessageImpl struct {
-	*HAMessageImpl
+type ResultMessage struct {
+	message
+	Success bool    `json:"success"`
+	Error   *Error  `json:"error,omitempty"`
+	Result  *Result `json:"result,omitempty"`
 }
 
-func NewAuthOkMessage() AuthOkMessage {
-	authOkMessage := &authOkMessageImpl{HAMessageImpl: &HAMessageImpl{}}
-	authOkMessage.Type = HA_MSG_TYPE_AUTH_OK
-	return authOkMessage
+type Result struct {
+	States []State
+	Map    map[string]interface{}
 }
 
-// Auth Invalid Message
-
-type AuthInvalidMessage interface {
-	HAMessage
-	GetMessage() string
+type State struct {
+	Attributes  map[string]interface{} `json:"attributes"`
+	EntityID    string                 `json:"entity_id"`
+	LastChanged EventTime              `json:"last_changed"`
+	LastUpdated EventTime              `json:"last_updated"`
+	State       string                 `json:"state"`
 }
 
-type authInvalidMessageImpl struct {
-	*HAMessageImpl
+func (r *Result) UnmarshalJSON(data []byte) error {
+	if data[0] == '[' {
+		return json.Unmarshal(data, &r.States)
+	}
+	if data[0] == '{' {
+		return json.Unmarshal(data, &r.Map)
+	}
+	return fmt.Errorf("Result should be object or array")
+}
+
+type Error struct {
+	Code    int    `json:"code"`
 	Message string `json:"message"`
 }
 
-func (aim *authInvalidMessageImpl) GetMessage() string {
-	return aim.Message
+var knownErrorCodes map[int]string = map[int]string{
+	1: "A non-increasing identifier has been supplied.",
+	2: "Received message is not in expected format (voluptuous validation error).",
+	3: "Requested item cannot be found.",
 }
 
-func NewAuthInvalidMessage(message string) AuthInvalidMessage {
-	authInvalidMessage := &authInvalidMessageImpl{HAMessageImpl: &HAMessageImpl{}}
-	authInvalidMessage.Type = HA_MSG_TYPE_AUTH_INVALID
-	authInvalidMessage.Message = message
-	return authInvalidMessage
+func (e *Error) Error() string {
+	desc, ok := knownErrorCodes[e.Code]
+	if !ok {
+		desc = "Unknown error code."
+	}
+	return fmt.Sprintf("Code %d. %s. %s", e.Code, desc, e.Message)
 }
 
-// Identified Message
-
-type IdentifiedMessage interface {
-	HAMessage
-	GetId() int
+type EventMessage struct {
+	message
+	Event *Event `json:"event"`
 }
 
-type IdentifiedMessageImpl struct {
-	*HAMessageImpl
-	Id int `json:"id"`
+type commonEvent struct {
+	EventType string     `json:"event_type"`
+	TimeFired *EventTime `json:"time_fired"`
+	Origin    string     `json:"origin"`
+	Data      map[string]interface{}
 }
 
-func (im *IdentifiedMessageImpl) GetId() int {
-	return im.Id
+type Event struct {
+	commonEvent
+	StateChangedData *StateChangedData
 }
 
-// Subscribe to events
-
-type SubscribeEventsMessage interface {
-	IdentifiedMessage
-	GetEventType() string
+type StateChangedData struct {
+	EntityID string `json:"entity_id"`
+	NewState *State `json:"new_state"`
+	OldState *State `json:"old_state"`
 }
 
-type subscribeEventsMessageImpl struct {
-	*IdentifiedMessageImpl
-	EventType string `json:"event_type,omitempty"`
-}
-
-func (semi *subscribeEventsMessageImpl) GetEventType() string {
-	return semi.EventType
-}
-
-func NewSubscribeEventsMessage(id int, eventType string) SubscribeEventsMessage {
-	subscribeEventsMessage := &subscribeEventsMessageImpl{IdentifiedMessageImpl: &IdentifiedMessageImpl{HAMessageImpl: &HAMessageImpl{}}}
-	subscribeEventsMessage.Type = HA_MSG_TYPE_SUBSCRIBE_EVENTS
-	subscribeEventsMessage.Id = id
-	subscribeEventsMessage.EventType = eventType
-	return subscribeEventsMessage
-}
-
-// Result Message
-
-type ResultMessage interface {
-	IdentifiedMessage
-	GetSuccess() bool
-}
-
-type resultMessageImpl struct {
-	*IdentifiedMessageImpl
-	Success bool `json:"success"`
-}
-
-func (rmi *resultMessageImpl) GetSuccess() bool {
-	return rmi.Success
-}
-
-func NewResultMessage(id int, success bool) ResultMessage {
-	resultMessage := &resultMessageImpl{IdentifiedMessageImpl: &IdentifiedMessageImpl{HAMessageImpl: &HAMessageImpl{}}}
-	resultMessage.Type = HA_MSG_TYPE_RESULT
-	resultMessage.Id = id
-	resultMessage.Success = success
-	return resultMessage
-}
-
-// Event Message
-
-type EventMessage interface {
-	IdentifiedMessage
-	GetEvent() *map[string]interface{}
-}
-
-type eventMessageImpl struct {
-	*IdentifiedMessageImpl
-	Event *map[string]interface{} `json:"event"`
-}
-
-func (emi *eventMessageImpl) GetEvent() *map[string]interface{} {
-	return emi.Event
-}
-
-func NewEventMessage(id int, event *map[string]interface{}) EventMessage {
-	eventMessageImpl := &eventMessageImpl{IdentifiedMessageImpl: &IdentifiedMessageImpl{HAMessageImpl: &HAMessageImpl{}}}
-	eventMessageImpl.Type = HA_MSG_TYPE_EVENT
-	eventMessageImpl.Id = id
-	eventMessageImpl.Event = event
-	return eventMessageImpl
-}
-
-// Unmarshall All
-
-func ParseMessage(data []byte) (HAMessage, error) {
-	var obj map[string]interface{}
-	err := json.Unmarshal(data, &obj)
+func (e *Event) UnmarshalJSON(data []byte) (err error) {
+	err = json.Unmarshal(data, &e.commonEvent)
 	if err != nil {
-		return nil, err
+		return
 	}
-	msgType := ""
-	if t, ok := obj["type"].(string); ok {
-		msgType = t
+	switch e.EventType {
+	case "state_changed":
+		v := struct {
+			StateChangedData *StateChangedData `json:"data"`
+		}{}
+		err = json.Unmarshal(data, &v)
+		if err != nil {
+			return
+		}
+		e.StateChangedData = v.StateChangedData
 	}
-	var actual HAMessage
-	switch msgType {
+	return
+}
+
+type EventTime struct {
+	Value time.Time
+}
+
+type CallServiceMessage struct {
+	message
+	Domain  string                 `json:"domain"`
+	Service string                 `json:"service"`
+	Data    map[string]interface{} `json:"service_data,omitempty"`
+}
+
+type GetStatesMessage struct {
+	message
+}
+
+func (e *EventTime) MarshalJSON() ([]byte, error) {
+	return []byte(fmt.Sprintf(`"%s"`, e.Value.Format("2006-01-02T15:04:05.000000-07:00"))), nil
+}
+
+func (e *EventTime) UnmarshalJSON(data []byte) error {
+	parsed, err := time.Parse(`"2006-01-02T15:04:05.000000-07:00"`, string(data))
+	if err != nil {
+		return err
+	}
+	e.Value = parsed
+	return nil
+}
+
+func NewMessage(messageType string) Message {
+	var dst Message
+	switch messageType {
 	case HA_MSG_TYPE_AUTH_REQUIRED:
-		actual = &authRequiredMessageImpl{}
+		dst = new(AuthRequiredMessage)
 	case HA_MSG_TYPE_AUTH:
-		actual = &authMessageImpl{}
+		dst = new(AuthMessage)
 	case HA_MSG_TYPE_AUTH_OK:
-		actual = &authOkMessageImpl{}
+		dst = new(AuthOkMessage)
 	case HA_MSG_TYPE_AUTH_INVALID:
-		actual = &authInvalidMessageImpl{}
+		dst = new(AuthInvalidMessage)
 	case HA_MSG_TYPE_RESULT:
-		actual = &resultMessageImpl{}
+		dst = new(ResultMessage)
 	case HA_MSG_TYPE_SUBSCRIBE_EVENTS:
-		actual = &subscribeEventsMessageImpl{}
+		dst = new(SubscribeEventsMessage)
+	case HA_MSG_TYPE_EVENT:
+		dst = new(EventMessage)
+	case HA_MSG_TYPE_CALL_SERVICE:
+		dst = new(CallServiceMessage)
+	case HA_MSG_TYPE_GET_STATES:
+		dst = new(GetStatesMessage)
 	}
-	err = json.Unmarshal(data, actual)
+	dst.setType(messageType)
+	return dst
+}
+
+func ParseMessage(data []byte) (Message, error) {
+	var m message
+	err := json.Unmarshal(data, &m)
 	if err != nil {
 		return nil, err
 	}
-	return actual, nil
+	dst := NewMessage(m.Type)
+	if m.ID != nil {
+		dst.SetID(*m.ID)
+	}
+	json.Unmarshal(data, &dst)
+	return dst, nil
 }

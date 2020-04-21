@@ -3,107 +3,141 @@ package homeassistant
 import (
 	"encoding/json"
 	"reflect"
-	"strings"
 	"testing"
-	"unicode"
+	"time"
 )
 
-func TestMessages(t *testing.T) {
-	authRequiredMessage := NewAuthRequiredMessage()
-	want := "auth_required"
-	got := authRequiredMessage.GetType()
-	if got != want {
-		t.Errorf("got %q want %q", got, want)
-	}
-}
+func TestMarshaling(t *testing.T) {
+	authRequiredMessage := NewMessage(HA_MSG_TYPE_AUTH_REQUIRED).(*AuthRequiredMessage)
+	authRequiredMessageJSON := `{"type":"auth_required"}`
 
-func StripWhitespace(str string) string {
-	var b strings.Builder
-	b.Grow(len(str))
-	for _, ch := range str {
-		if !unicode.IsSpace(ch) {
-			b.WriteRune(ch)
-		}
-	}
-	return b.String()
-}
+	authMessage := NewMessage(HA_MSG_TYPE_AUTH).(*AuthMessage)
+	authMessage.AccessToken = "123"
+	authMessageJSON := `{"type":"auth","access_token":"123"}`
 
-func TestMarshalMessages(t *testing.T) {
-	messages := []struct {
+	authOkMessage := NewMessage(HA_MSG_TYPE_AUTH_OK).(*AuthOkMessage)
+	authOkMessageJSON := `{"type":"auth_ok"}`
+
+	authInvalidMessage := NewMessage(HA_MSG_TYPE_AUTH_INVALID).(*AuthInvalidMessage)
+	authInvalidMessageJSON := `{"type":"auth_invalid"}`
+
+	resultMessage := NewMessage(HA_MSG_TYPE_RESULT).(*ResultMessage)
+	resultMessage.SetID(13)
+	resultMessage.Success = true
+	resultMessage.Error = nil
+	resultMessageJSON := `{"type":"result","id":13,"success":true}`
+
+	errorMessage := NewMessage(HA_MSG_TYPE_RESULT).(*ResultMessage)
+	errorMessage.SetID(13)
+	errorMessage.Success = false
+	errorMessage.Error = &Error{Code: 123, Message: "some_error_message"}
+	errorMessageJSON := `{"type":"result","id":13,"success":false,"error":{"code":123,"message":"some_error_message"}}`
+
+	subscribeEventsMessage := NewMessage(HA_MSG_TYPE_SUBSCRIBE_EVENTS).(*SubscribeEventsMessage)
+	subscribeEventsMessage.SetID(12)
+	eventType := "some_event"
+	subscribeEventsMessage.EventType = &eventType
+	subscribeEventsMessageJSON := `{"type":"subscribe_events","id":12,"event_type":"some_event"}`
+
+	subscribeAllEventsMessage := NewMessage(HA_MSG_TYPE_SUBSCRIBE_EVENTS).(*SubscribeEventsMessage)
+	subscribeAllEventsMessage.SetID(12)
+	subscribeAllEventsMessage.EventType = nil
+	subscribeAllEventsMessageJSON := `{"type":"subscribe_events","id":12}`
+
+	eventMessage := NewMessage(HA_MSG_TYPE_EVENT).(*EventMessage)
+	eventMessage.SetID(18)
+	eventMessage.Event = &Event{}
+	eventMessage.Event.EventType = "state_changed"
+	timeFired, _ := time.Parse(time.RFC3339, "2016-11-26T01:37:24.265429+00:00")
+	eventMessage.Event.TimeFired = &EventTime{timeFired}
+	eventMessage.Event.Origin = "LOCAL"
+	eventMessage.Event.Data = map[string]interface{}{
+		"entity_id": "light.bed_light",
+		"new_state": map[string]interface{}{
+			"entity_id":    "light.bed_light",
+			"last_changed": "2016-11-26T01:37:24.265390+00:00",
+			"last_updated": "2016-11-26T01:37:24.265390+00:00",
+			"state":        "on",
+		},
+		"old_state": map[string]interface{}{
+			"entity_id":    "light.bed_light",
+			"last_changed": "2016-11-26T01:37:10.466994+00:00",
+			"last_updated": "2016-11-26T01:37:10.466994+00:00",
+			"state":        "off",
+		},
+	}
+
+	eventMessageJSON := `{"type":"event","id":18,"event":{"data":{"entity_id":"light.bed_light","new_state":{"entity_id":"light.bed_light","last_changed":"2016-11-26T01:37:24.265390+00:00","last_updated":"2016-11-26T01:37:24.265390+00:00","state":"on"},"old_state":{"entity_id":"light.bed_light","last_changed":"2016-11-26T01:37:10.466994+00:00","last_updated":"2016-11-26T01:37:10.466994+00:00","state":"off"}},"event_type":"state_changed","time_fired":"2016-11-26T01:37:24.265429+00:00","origin":"LOCAL"}}`
+
+	messageTests := []struct {
 		name    string
-		msg     HAMessage
+		msg     Message
 		jsonMsg string
 	}{
 		{
-			name: "AuthRequiredMessage",
-			msg:  NewAuthRequiredMessage(),
-			jsonMsg: `
-				{ "type": "auth_required" }
-			`,
+			name:    "AuthRequiredMessage",
+			msg:     authRequiredMessage,
+			jsonMsg: authRequiredMessageJSON,
 		},
 		{
-			name: "AuthMessage",
-			msg:  NewAuthMessage("123"),
-			jsonMsg: `
-				{ "type": "auth", "access_token": "123" }
-			`,
+			name:    "AuthMessage",
+			msg:     authMessage,
+			jsonMsg: authMessageJSON,
 		},
 		{
-			name: "AuthOkMessage",
-			msg:  NewAuthOkMessage(),
-			jsonMsg: `
-				{ "type": "auth_ok" }
-			`,
+			name:    "AuthOkMessage",
+			msg:     authOkMessage,
+			jsonMsg: authOkMessageJSON,
 		},
 		{
-			name: "AuthInvalidMessage",
-			msg:  NewAuthInvalidMessage("Invalidpassword"),
-			jsonMsg: `
-				{ "type": "auth_invalid", "message": "Invalidpassword" }
-			`,
+			name:    "AuthInvalidMessage",
+			msg:     authInvalidMessage,
+			jsonMsg: authInvalidMessageJSON,
 		},
 		{
-			name: "ResultMessage",
-			msg:  NewResultMessage(13, false),
-			jsonMsg: `
-				{ "type": "result", "id": 13, "success": false }
-			`,
+			name:    "ResultMessage",
+			msg:     resultMessage,
+			jsonMsg: resultMessageJSON,
 		},
 		{
-			name: "SubscribeEventsMessage",
-			msg:  NewSubscribeEventsMessage(13, "state_changed"),
-			jsonMsg: `
-				{ "type": "subscribe_events", "id": 13, "event_type": "state_changed" }
-			`,
+			name:    "ErrorMessage",
+			msg:     errorMessage,
+			jsonMsg: errorMessageJSON,
 		},
 		{
-			name: "EventMessage",
-			msg:  NewEventMessage(13, nil),
-			jsonMsg: `
-				{ "type": "event", "id": 13, "event": null }
-			`,
+			name:    "SubscribeEventsMessage",
+			msg:     subscribeEventsMessage,
+			jsonMsg: subscribeEventsMessageJSON,
+		},
+		{
+			name:    "SubscribeAllEventsMessage",
+			msg:     subscribeAllEventsMessage,
+			jsonMsg: subscribeAllEventsMessageJSON,
+		},
+		{
+			name:    "EventMessage",
+			msg:     eventMessage,
+			jsonMsg: eventMessageJSON,
 		},
 	}
-	testMarshall := func(t *testing.T, message HAMessage, jsonMessage string) {
+	testMarshall := func(t *testing.T, message Message, jsonMessage string) {
 		t.Helper()
 		got, _ := json.Marshal(message)
-		want := StripWhitespace(jsonMessage)
-		if string(got) != StripWhitespace(jsonMessage) {
-			t.Errorf("got %q want %q", string(got), want)
+		if string(got) != jsonMessage {
+			t.Errorf("got %q want %q", string(got), jsonMessage)
 		}
 	}
-	testUnMarshall := func(t *testing.T, message HAMessage, jsonMessage string) {
+	testUnMarshall := func(t *testing.T, message Message, jsonMessage string) {
 		t.Helper()
 		got, err := ParseMessage([]byte(jsonMessage))
 		if err != nil {
 			t.Errorf("On Parse Message: %s", err)
 		}
-		want := message
-		if !reflect.DeepEqual(got, want) {
-			t.Errorf("got %q want %q", got, want)
+		if !reflect.DeepEqual(got, message) {
+			t.Errorf("got %q want %q", got, message)
 		}
 	}
-	for _, item := range messages {
+	for _, item := range messageTests {
 		t.Run(item.name, func(t *testing.T) {
 			testMarshall(t, item.msg, item.jsonMsg)
 			testUnMarshall(t, item.msg, item.jsonMsg)
